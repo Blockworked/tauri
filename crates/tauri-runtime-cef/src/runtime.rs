@@ -2103,6 +2103,20 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
         );
       }
       WinitWindowEvent::Focused(focused) => {
+        // Winit reports the native top-level window gaining focus (e.g.
+        // alt-tab, or a click on the title bar/frame) without that focus
+        // ever reaching a CEF child's own HWND — CEF only considers itself
+        // focused once CefBrowserHost::SetFocus is called on it directly, and
+        // nothing did so automatically before this. Left alone, a browser
+        // that doesn't think it's focused won't route key events to
+        // on_pre_key_event, so a host relying on that (see
+        // `set_focused_key_hook`) sees the window come to the foreground with
+        // no keyboard events at all until the user clicks directly into the
+        // page content, which does transfer native focus straight to the CEF
+        // child.
+        for child in &appwindow.children {
+          child.host.set_focus(focused as i32);
+        }
         self.emit_window_event(window_id, WindowEvent::Focused(focused));
       }
       WinitWindowEvent::ThemeChanged(theme) => {
