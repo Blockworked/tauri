@@ -20,7 +20,7 @@ mod display;
 mod download;
 mod drag;
 mod frame;
-mod keyboard;
+pub(crate) mod keyboard;
 mod life_span;
 mod load;
 mod permission;
