@@ -38,6 +38,7 @@ mod window_builder;
 mod window_handle;
 
 pub use cef::sys::CEF_API_VERSION_LAST;
+pub use cef_impl::client::keyboard::set_focused_key_hook;
 #[cfg(target_os = "macos")]
 pub use platform::macos::setup_application as prepare_macos_application;
 pub use runtime::*;
