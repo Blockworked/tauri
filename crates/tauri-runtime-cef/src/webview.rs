@@ -443,6 +443,18 @@ pub(crate) struct AppWebview {
   pub(crate) devtools_enabled: bool,
   pub(crate) listeners: WebviewEventListeners,
   pub(crate) bounds_rate: Option<BoundsRate>,
+  /// Last bounds applied via `CefBrowserHost::SetWindowBounds()`. Wayland has
+  /// no equivalent of `XGetGeometry` to read them back (a `wl_subsurface`'s
+  /// position lives in the compositor, not somewhere queryable), so this is
+  /// what backs `bounds()` there.
+  #[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  ))]
+  pub(crate) wayland_bounds: std::cell::Cell<Option<Rect>>,
 }
 
 impl AppWebview {
@@ -695,13 +707,57 @@ impl<T: UserEvent> WinitCefApp<T> {
       height: bounds.size.height,
     };
 
-    // Let CEF pick the runtime style unless overridden per-webview.
+    // Let CEF pick the runtime style unless overridden per-webview. Under
+    // Wayland, default to Alloy instead of CEF's own default (Chrome):
+    // `ChromeBrowserHostImpl::WasResized()` isn't implemented for the new
+    // subsurface-based windowed path, and calling `SetWindowBounds()` on a
+    // Chrome-runtime-style browser crashes on the first resize. Alloy is
+    // what `tests/cefembed_wayland` (the upstream sample for this API) uses.
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let wayland_default_style = if crate::runtime::is_wayland() {
+      cef::RuntimeStyle::ALLOY
+    } else {
+      cef::RuntimeStyle::DEFAULT
+    };
+    #[cfg(not(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    )))]
+    let wayland_default_style = cef::RuntimeStyle::DEFAULT;
+
     let cef_runtime_style = match pending.runtime_specific_attributes.runtime_style {
       Some(RuntimeStyle::Alloy) => cef::RuntimeStyle::ALLOY,
       Some(RuntimeStyle::Chrome) => cef::RuntimeStyle::CHROME,
-      None => cef::RuntimeStyle::DEFAULT,
+      None => wayland_default_style,
     };
 
+    // `set_as_child_wayland`'s third argument is ignored under X11, so it
+    // covers both backends; winit doesn't expose the client's `xdg_surface`,
+    // so popups fall back to CEF's degraded (clipped, non-dismissing) form.
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let mut window_info = cef::WindowInfo::default().set_as_child_wayland(parent, None, &bounds);
+    #[cfg(not(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    )))]
     let mut window_info = cef::WindowInfo::default().set_as_child(parent, &bounds);
     window_info.runtime_style = cef_runtime_style;
     let mut settings = browser_settings_from_webview_attributes(&pending.webview_attributes);
@@ -821,6 +877,14 @@ impl<T: UserEvent> WinitCefApp<T> {
             devtools_enabled,
             listeners: Default::default(),
             bounds_rate,
+            #[cfg(any(
+              target_os = "linux",
+              target_os = "dragonfly",
+              target_os = "freebsd",
+              target_os = "netbsd",
+              target_os = "openbsd"
+            ))]
+            wayland_bounds: Default::default(),
           })
           .expect("failed to send initialized CEF browser");
       }

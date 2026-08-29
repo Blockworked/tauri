@@ -20,6 +20,14 @@ use std::{
 
 use cef::*;
 use raw_window_handle::{DisplayHandle, HasDisplayHandle};
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+use raw_window_handle::RawDisplayHandle;
 use tauri_runtime::{
   DeviceEventFilter, Error, EventLoopProxy, ExitRequestedEventAction, Result, RunEvent, Runtime,
   RuntimeHandle, RuntimeInitArgs, UserEvent,
@@ -2550,6 +2558,30 @@ impl TerminationSignals {
   }
 }
 
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Whether this process selected the Wayland Ozone platform. Set once during
+/// [`CefRuntime::init`], before any window is created; every browser in the
+/// process shares the same `--ozone-platform` choice, so this is process-wide
+/// rather than per-window.
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+pub(crate) fn is_wayland() -> bool {
+  *IS_WAYLAND.get().unwrap_or(&false)
+}
+
 impl<T: UserEvent> CefRuntime<T> {
   fn init(
     mut event_loop_builder: EventLoopBuilder,
@@ -2687,6 +2719,20 @@ impl<T: UserEvent> CefRuntime<T> {
         browser_command_line_args.push(("--use-mock-keychain".to_string(), None));
       }
     }
+    // Ozone picks X11 whenever `DISPLAY` is set, which under a Wayland session
+    // means XWayland — and CEF then reads a Wayland `wl_surface*` as an X11
+    // `Window`, an undefined-rather-than-diagnosed failure. The platform must
+    // therefore be selected explicitly, matching whatever winit itself will
+    // connect to, so the two agree on which native handles are in play.
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let use_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+
     #[cfg(any(
       target_os = "linux",
       target_os = "dragonfly",
@@ -2840,7 +2886,11 @@ impl<T: UserEvent> CefRuntime<T> {
     });
     let _ = create_dir_all(&cache_path);
 
-    // Force X11 usage on Linux.
+    // Ozone platform, selected explicitly so CEF and winit agree.
+    //
+    // Ozone picks X11 whenever `DISPLAY` is set, which under a Wayland session
+    // means XWayland — and CEF then reads a Wayland `wl_surface*` as an X11
+    // `Window`, an undefined-rather-than-diagnosed failure.
     //
     // Applied to every process type rather than only the browser one: it is not certain
     // that Chromium propagates `ozone-platform` to the GPU process, and getting it wrong
@@ -2853,8 +2903,16 @@ impl<T: UserEvent> CefRuntime<T> {
       target_os = "openbsd"
     ))]
     {
-      internal_command_line_args.push(("--ozone-platform".to_string(), Some("x11".to_string())));
-      event_loop_builder.with_x11();
+      let _ = IS_WAYLAND.set(use_wayland);
+      if use_wayland {
+        use winit::platform::wayland::EventLoopBuilderExtWayland;
+        internal_command_line_args
+          .push(("--ozone-platform".to_string(), Some("wayland".to_string())));
+        event_loop_builder.with_wayland();
+      } else {
+        internal_command_line_args.push(("--ozone-platform".to_string(), Some("x11".to_string())));
+        event_loop_builder.with_x11();
+      }
     }
 
     #[cfg(windows)]
@@ -2869,6 +2927,28 @@ impl<T: UserEvent> CefRuntime<T> {
     let event_loop = event_loop_builder
       .build()
       .map_err(|_| Error::CreateWindow)?;
+
+    // Chromium builds its own `WaylandConnection` while initializing Ozone,
+    // inside `cef::initialize` below and long before any `CefWindowInfo`
+    // exists, so joining the client's connection is necessarily a one-time,
+    // process-wide decision made here rather than per-window. winit already
+    // opened this connection above; CEF adopts it instead of opening its own,
+    // which is what makes embedding a browser into a winit-owned `wl_surface`
+    // possible at all (a `wl_surface` cannot cross a connection boundary).
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    if use_wayland
+      && let Ok(RawDisplayHandle::Wayland(handle)) =
+        event_loop.display_handle().map(|handle| handle.as_raw())
+    {
+      cef::set_wayland_display(handle.display.as_ptr() as *mut u8);
+    }
+
     let proxy = event_loop.create_proxy();
     let (sender, receiver) = mpsc::channel();
     let context_initialized = Arc::new(AtomicBool::new(false));
