@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: MIT
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::os::raw::c_ulong;
+use std::{num::NonZeroU32, os::raw::c_ulong};
 use tauri_runtime::ProgressBarState;
 use tauri_utils::config::Color;
 
-use crate::window::AppWindow;
+use crate::{window::AppWindow, window_handle::SoftbufferWindowHandle};
 
 use super::{taskbar, utils::set_wm_state};
 
@@ -104,5 +104,61 @@ impl AppWindow {
 
   pub(crate) fn set_progress_bar(&self, state: ProgressBarState) {
     taskbar::set_progress_bar(state);
+  }
+
+  /// Paints the window's own background over everything its webviews do not
+  /// cover.
+  ///
+  /// This is the only thing that ever paints the host window itself on
+  /// Wayland, and it isn't optional there: a toplevel `wl_surface` isn't
+  /// actually mapped by the compositor until the client attaches and commits
+  /// a buffer to it, and winit deliberately never does this on the app's
+  /// behalf (it fires `RedrawRequested` instead, once per configure, and
+  /// leaves drawing to the app). Without this, the window can still get a
+  /// taskbar entry -- the `xdg_toplevel` exists -- while never actually
+  /// becoming visible. X11 has no such requirement, so this is skipped there;
+  /// its background painting still goes through `set_background_color`.
+  pub(crate) fn draw_background_surface(&mut self) {
+    if !crate::runtime::is_wayland() {
+      return;
+    }
+
+    let size = self.window.surface_size();
+    let (Some(width), Some(height)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+    else {
+      return;
+    };
+
+    if self.background_surface.is_none() {
+      let Some(handle) = SoftbufferWindowHandle::new(self.window.as_ref()) else {
+        return;
+      };
+      let Ok(context) = softbuffer::Context::new(handle) else {
+        return;
+      };
+      let Ok(surface) = softbuffer::Surface::new(&context, handle) else {
+        return;
+      };
+      self.background_surface = Some(surface);
+    }
+
+    let Some(surface) = &mut self.background_surface else {
+      return;
+    };
+
+    let color = match self.attrs.background_color {
+      Some(Color(r, g, b, _)) => (b as u32) | ((g as u32) << 8) | ((r as u32) << 16),
+      // A transparent window paints nothing so the desktop shows through, while
+      // an ordinary one falls back to the opaque white a blank browser shows.
+      None if self.attrs.inner.transparent => 0,
+      None => 0x00ff_ffff,
+    };
+
+    if surface.resize(width, height).is_ok()
+      && let Ok(mut buffer) = surface.buffer_mut()
+    {
+      buffer.fill(color);
+      let _ = buffer.present();
+    }
   }
 }

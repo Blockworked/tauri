@@ -2154,7 +2154,14 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
       WinitWindowEvent::DragLeft { .. } => {
         self.emit_window_event(window_id, WindowEvent::DragDrop(DragDropEvent::Leave));
       }
-      #[cfg(windows)]
+      #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
       WinitWindowEvent::RedrawRequested => {
         appwindow.draw_background_surface();
       }

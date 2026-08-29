@@ -39,7 +39,14 @@ use winit::platform::macos::WindowExtMacOS;
 #[cfg(windows)]
 use winit::platform::windows::WindowExtWindows;
 
-#[cfg(windows)]
+#[cfg(any(
+  windows,
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
 use crate::window_handle::SoftbufferWindowHandle;
 use crate::{
   cef_impl::{client as browser_client, request_context},
@@ -340,7 +347,14 @@ pub(crate) enum WindowMessage {
   StartResizeDragging(tauri_runtime::ResizeDirection),
 }
 
-#[cfg(windows)]
+#[cfg(any(
+  windows,
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
 type SoftbufferSurface = softbuffer::Surface<SoftbufferWindowHandle, SoftbufferWindowHandle>;
 
 /// Opaque identity of one runtime-owned native window lifetime. Reparented
@@ -395,7 +409,14 @@ pub(crate) struct AppWindow {
   #[allow(unused)]
   pub(crate) id: WindowId,
   pub(crate) label: String,
-  #[cfg(windows)]
+  #[cfg(any(
+    windows,
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  ))]
   pub(crate) background_surface: Option<SoftbufferSurface>,
   pub(crate) window: Box<dyn WinitWindow>,
   pub(crate) attrs: AppWindowAttrs,
@@ -538,7 +559,14 @@ impl<T: UserEvent> WinitCefApp<T> {
       lifetime: NativeWindowToken::new(),
       id: window_id,
       label: pending.label.clone(),
-      #[cfg(windows)]
+      #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
       background_surface: None,
       window,
       attrs,
@@ -567,10 +595,25 @@ impl<T: UserEvent> WinitCefApp<T> {
       appwindow.set_skip_taskbar(appwindow.attrs.skip_taskbar);
     }
 
-    #[cfg(windows)]
+    // The only thing that ever paints the host window itself, so it must run
+    // even with no configured background color: on Wayland, a toplevel isn't
+    // actually mapped (shown) by the compositor until the client attaches and
+    // commits at least one buffer to its surface — winit deliberately doesn't
+    // do this on the app's behalf (see winit-wayland's `configure` handler),
+    // so without this call the window exists (e.g. it can still show up in a
+    // taskbar) but never becomes visible. X11 has no such requirement, but
+    // painting here is harmless there too.
+    #[cfg(any(
+      windows,
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
     appwindow.draw_background_surface();
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     if appwindow.attrs.background_color.is_some() {
       appwindow.set_background_color(appwindow.attrs.background_color);
     }
