@@ -563,7 +563,7 @@ impl Cef {
   }
 
   /// CEF API version this process declares (`cef_api_hash`), defaulting to
-  /// `cef::sys::CEF_API_VERSION_LAST`.
+  /// `cef::sys::CEF_API_VERSION_EXPERIMENTAL`.
   #[must_use]
   pub fn cef_api_version(mut self, version: i32) -> Self {
     self.api_version = Some(version);
@@ -2326,7 +2326,9 @@ pub fn run_cef_helper_process() {
     loader
   };
 
-  let _ = cef::api_hash(sys::CEF_API_VERSION_LAST, 0);
+  // Must match the version the main process selects in `CefRuntime::init`;
+  // see the comment there.
+  let _ = cef::api_hash(sys::CEF_API_VERSION_EXPERIMENTAL, 0);
   let mut app = TauriCefHelperApp::new();
   let _ = cef::execute_process(
     Some(args.as_main_args()),
@@ -2637,10 +2639,21 @@ impl<T: UserEvent> CefRuntime<T> {
     // The CEF API version table must be initialized before any other CEF call
     // (e.g. `args.as_cmd_line()` below), otherwise the process crashes with no
     // diagnostics.
+    //
+    // Defaults to the experimental API, not `CEF_API_VERSION_LAST` (a stable,
+    // numbered version): under a stable version, `cef_browser_host_t` is
+    // published without the new Wayland-embedding members entirely -- e.g.
+    // `set_window_bounds` isn't part of the struct CEF allocates -- so our
+    // bindings (generated against the experimental headers) read a function
+    // pointer from past the end of that allocation. That looked like a CEF
+    // bug for a long time (a poisoned-memory crash calling the garbage
+    // "pointer" found there, or silently doing nothing when the garbage
+    // happened to be zero) before turning out to be this. The experimental
+    // struct only appends fields, so this is safe for the X11 path too.
     let version = runtime_args
       .runtime_init_attrs
       .api_version
-      .unwrap_or(sys::CEF_API_VERSION_LAST);
+      .unwrap_or(sys::CEF_API_VERSION_EXPERIMENTAL);
     let _ = cef::api_hash(version, 0);
 
     // Handle CEF subprocesses (renderer/GPU/utility) before any browser-only
