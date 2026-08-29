@@ -189,12 +189,6 @@ impl AppWebview {
         size: PhysicalSize::new(width as u32, height as u32).into(),
       }));
 
-      // `CefBrowserHost::SetWindowBounds()` used to reliably segfault inside
-      // CEF's own implementation on a real subsequent resize, sharing a
-      // poisoned-memory register pattern with the wayland_output_manager
-      // DCHECK crash this build disables (both read not-yet-ready Wayland
-      // output state) -- worth re-testing here if resizing misbehaves again
-      // after any CEF rebuild.
       if !is_initial_layout {
         let dip_bounds = cef::Rect {
           x: (f64::from(x) / scale).round() as i32,
