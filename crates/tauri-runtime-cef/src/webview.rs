@@ -698,6 +698,35 @@ impl<T: UserEvent> WinitCefApp<T> {
       position: PhysicalPosition::new(0, 0).into(),
       size: parent_size.into(),
     });
+    // Wayland's `SetAsChild` bounds are DIP (surface-local, like everything
+    // else in the Wayland embedding API), the same units `SetWindowBounds`
+    // uses on resize -- not device pixels, unlike the X11 `bounds` field this
+    // shares a name with. Passing physical pixels here under HiDPI scaling
+    // makes CEF render at a viewport up to `scale`x too large while the
+    // visible wl_subsurface stays the correct (smaller) size, so the page's
+    // fixed-position/vw/vh content ends up positioned off-screen.
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let bounds_dip = bounds.to_logical::<i32, i32>(scale);
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let bounds_dip = cef::Rect {
+      x: bounds_dip.position.x,
+      y: bounds_dip.position.y,
+      width: bounds_dip.size.width,
+      height: bounds_dip.size.height,
+    };
+
     #[cfg(not(target_os = "macos"))]
     let bounds = bounds.to_physical::<i32, i32>(scale);
     #[cfg(target_os = "macos")]
@@ -742,9 +771,12 @@ impl<T: UserEvent> WinitCefApp<T> {
       None => wayland_default_style,
     };
 
-    // `set_as_child_wayland`'s third argument is ignored under X11, so it
-    // covers both backends; winit doesn't expose the client's `xdg_surface`,
-    // so popups fall back to CEF's degraded (clipped, non-dismissing) form.
+    // `set_as_child_wayland`'s third argument is ignored under X11, so the
+    // same call covers both backends -- but the bounds argument itself is
+    // not backend-agnostic: X11 wants physical pixels like the rest of that
+    // windowing system, Wayland wants DIP. winit doesn't expose the client's
+    // `xdg_surface`, so popups fall back to CEF's degraded (clipped,
+    // non-dismissing) form.
     #[cfg(any(
       target_os = "linux",
       target_os = "dragonfly",
@@ -752,7 +784,20 @@ impl<T: UserEvent> WinitCefApp<T> {
       target_os = "netbsd",
       target_os = "openbsd"
     ))]
-    let mut window_info = cef::WindowInfo::default().set_as_child_wayland(parent, None, &bounds);
+    let initial_bounds = if crate::runtime::is_wayland() {
+      &bounds_dip
+    } else {
+      &bounds
+    };
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let mut window_info =
+      cef::WindowInfo::default().set_as_child_wayland(parent, None, initial_bounds);
     #[cfg(not(any(
       target_os = "linux",
       target_os = "dragonfly",
