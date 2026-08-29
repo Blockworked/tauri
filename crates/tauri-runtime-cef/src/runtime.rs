@@ -1873,7 +1873,6 @@ impl<T: UserEvent> WinitCefApp<T> {
       child.host.close_dev_tools();
       child.host.close_browser(1);
     }
-
     if appwindow.children.is_empty() {
       // Nothing is left to close, so the native window goes now.
       drop(appwindow);
@@ -2589,6 +2588,20 @@ static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 ))]
 pub(crate) fn is_wayland() -> bool {
   *IS_WAYLAND.get().unwrap_or(&false)
+}
+
+/// Non-Linux platforms have no Wayland concept at all; callers in
+/// cross-platform code can use this unconditionally instead of cfg-gating
+/// every call site.
+#[cfg(not(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+)))]
+pub(crate) fn is_wayland() -> bool {
+  false
 }
 
 impl<T: UserEvent> CefRuntime<T> {
