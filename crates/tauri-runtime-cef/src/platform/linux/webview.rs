@@ -189,17 +189,13 @@ impl AppWebview {
         size: PhysicalSize::new(width as u32, height as u32).into(),
       }));
 
-      // `CefBrowserHost::SetWindowBounds()` reliably segfaults inside CEF's
-      // own implementation (poisoned-memory register pattern, not a bad
-      // argument on our side) as soon as it's called on a real subsequent
-      // resize, under both Alloy and Chrome runtime style, verified against
-      // upstream chromiumembedded/cef#4233 on a live KDE/kwin session. That
-      // PR is an unmerged draft and says as much about its own maturity, so
-      // this is disabled rather than crashing the host application; the
-      // embedded browser keeps its bounds from creation until this is fixed
-      // upstream. Flip to `true` once SetWindowBounds is verified stable.
-      const SET_WINDOW_BOUNDS_ENABLED: bool = false;
-      if SET_WINDOW_BOUNDS_ENABLED && !is_initial_layout {
+      // `CefBrowserHost::SetWindowBounds()` used to reliably segfault inside
+      // CEF's own implementation on a real subsequent resize, sharing a
+      // poisoned-memory register pattern with the wayland_output_manager
+      // DCHECK crash this build disables (both read not-yet-ready Wayland
+      // output state) -- worth re-testing here if resizing misbehaves again
+      // after any CEF rebuild.
+      if !is_initial_layout {
         let dip_bounds = cef::Rect {
           x: (f64::from(x) / scale).round() as i32,
           y: (f64::from(y) / scale).round() as i32,
