@@ -17,19 +17,47 @@
         }
       }
 
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+      }
+
       body {
         color: var(--text-color);
-        background-color: var(--background-color);
+        background: repeating-linear-gradient(
+          45deg,
+          #ff00ff,
+          #ff00ff 20px,
+          #00ffff 20px,
+          #00ffff 40px
+        );
         margin: 0;
         padding: 2rem;
+        box-sizing: border-box;
         font-family:
           system-ui,
           -apple-system,
           sans-serif;
       }
+
+      #sizecheck {
+        position: fixed;
+        inset: 0;
+        border: 10px solid lime;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
+    <div id="sizecheck"></div>
+    <h1 id="dims" style="background: black; display: inline-block; padding: 0.5rem;"></h1>
+    <script>
+      const dimsEl = document.getElementById('dims')
+      const update = () => { dimsEl.textContent = `${window.innerWidth} x ${window.innerHeight}` }
+      update()
+      window.addEventListener('resize', update)
+    </script>
     <h1>Welcome to Tauri!</h1>
 
     <form id="form">
