@@ -67,6 +67,13 @@ impl AppWebview {
   }
 
   pub(crate) fn bounds(&self) -> Option<Rect> {
+    // A wl_subsurface's position lives in the compositor; there's no
+    // Wayland equivalent of XGetGeometry to read it back, so this reports
+    // whatever was last pushed through `apply_physical_bounds`.
+    if crate::runtime::is_wayland() {
+      return self.wayland_bounds.get();
+    }
+
     let xid = self.xid();
 
     with_cef_display(None, |xlib, display| unsafe {
@@ -101,6 +108,13 @@ impl AppWebview {
   }
 
   pub(crate) fn reparent(&self, parent: &AppWindow) {
+    // A wl_subsurface is bound to its parent surface at creation and can't be
+    // reattached to a different one; moving a webview to another window has
+    // no Wayland equivalent.
+    if crate::runtime::is_wayland() {
+      return;
+    }
+
     let xid = self.xid();
     // Linux reparents into the GTK content-area X11 host, unlike Windows/macOS
     // where the CEF host handle is the native window/view.
@@ -113,6 +127,12 @@ impl AppWebview {
   }
 
   pub(crate) fn apply_visible(&self, visible: bool) {
+    // No `_NET_WM_STATE`-equivalent for a wl_subsurface; hide/show isn't part
+    // of the upstream Wayland embedding API.
+    if crate::runtime::is_wayland() {
+      return;
+    }
+
     let xid = self.xid();
 
     with_cef_display((), |xlib, display| unsafe {
@@ -148,7 +168,49 @@ impl AppWebview {
     });
   }
 
-  pub(crate) fn apply_physical_bounds(&self, _scale: f64, x: i32, y: i32, width: i32, height: i32) {
+  pub(crate) fn apply_physical_bounds(&self, scale: f64, x: i32, y: i32, width: i32, height: i32) {
+    let width = width.max(1);
+    let height = height.max(1);
+
+    if crate::runtime::is_wayland() {
+      // A wl_subsurface receives no configure events, so unlike X11 (where
+      // the browser observes the parent window and resizes itself) the
+      // client must push layout explicitly. The values are DIP, not device
+      // pixels: they reach wl_subsurface.set_position, which is surface-local
+      // and therefore in the compositor's logical units for that surface.
+      //
+      // The very first call is skipped: `CefWindowInfo::SetAsChild` already
+      // establishes the initial bounds at creation time, and calling
+      // `SetWindowBounds()` again immediately races the embedded window's own
+      // (asynchronous) setup on CEF's UI thread.
+      let is_initial_layout = self.wayland_bounds.get().is_none();
+      self.wayland_bounds.set(Some(Rect {
+        position: PhysicalPosition::new(x, y).into(),
+        size: PhysicalSize::new(width as u32, height as u32).into(),
+      }));
+
+      // `CefBrowserHost::SetWindowBounds()` reliably segfaults inside CEF's
+      // own implementation (poisoned-memory register pattern, not a bad
+      // argument on our side) as soon as it's called on a real subsequent
+      // resize, under both Alloy and Chrome runtime style, verified against
+      // upstream chromiumembedded/cef#4233 on a live KDE/kwin session. That
+      // PR is an unmerged draft and says as much about its own maturity, so
+      // this is disabled rather than crashing the host application; the
+      // embedded browser keeps its bounds from creation until this is fixed
+      // upstream. Flip to `true` once SetWindowBounds is verified stable.
+      const SET_WINDOW_BOUNDS_ENABLED: bool = false;
+      if SET_WINDOW_BOUNDS_ENABLED && !is_initial_layout {
+        let dip_bounds = cef::Rect {
+          x: (f64::from(x) / scale).round() as i32,
+          y: (f64::from(y) / scale).round() as i32,
+          width: (f64::from(width) / scale).round() as i32,
+          height: (f64::from(height) / scale).round() as i32,
+        };
+        self.host.set_window_bounds(Some(&dip_bounds));
+      }
+      return;
+    }
+
     let xid = self.xid();
 
     with_cef_display((), |xlib, display| unsafe {

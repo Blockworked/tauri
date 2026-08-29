@@ -151,7 +151,20 @@ impl Drop for CefX11Host {
 }
 
 impl AppWindow {
+  /// The native parent handle passed to `CefWindowInfo::SetAsChild`: the X11 host window under
+  /// Ozone/X11, or a `wl_surface*` under Ozone/Wayland (winit-gtk4 reports a Wayland handle
+  /// when GDK itself runs on the Wayland backend).
   pub(crate) fn cef_host_handle(&self) -> cef::sys::cef_window_handle_t {
+    if crate::runtime::is_wayland() {
+      let handle = self
+        .window
+        .window_handle()
+        .expect("failed to get window handle");
+      let RawWindowHandle::Wayland(handle) = handle.as_raw() else {
+        panic!("expected Wayland window handle, got {:?}", handle.as_raw());
+      };
+      return handle.surface.as_ptr() as cef::sys::cef_window_handle_t;
+    }
     self.cef_host.xid as cef::sys::cef_window_handle_t
   }
 
@@ -198,6 +211,11 @@ impl AppWindow {
   pub(crate) fn set_background_color(&self, color: Option<Color>) {
     use gtk::prelude::*;
 
+    // No X11 host to paint under Wayland; the browser's own background
+    // (BrowserSettings.background_color) is what's visible there.
+    if crate::runtime::is_wayland() {
+      return;
+    }
     let Some(window) = self.window.gtk_window() else {
       return;
     };
@@ -235,10 +253,19 @@ impl AppWindow {
   }
 
   pub(crate) fn set_skip_taskbar(&self, skip: bool) {
+    // `_NET_WM_STATE` is an X11 window-manager property; Wayland has no
+    // equivalent for a client to set on itself (compositor-specific
+    // protocols aside), so this becomes the client's job there.
+    if crate::runtime::is_wayland() {
+      return;
+    }
     set_wm_state(self.xid(), skip, "_NET_WM_STATE_SKIP_TASKBAR", None);
   }
 
   pub(crate) fn set_visible_on_all_workspaces(&self, visible: bool) {
+    if crate::runtime::is_wayland() {
+      return;
+    }
     set_wm_state(self.xid(), visible, "_NET_WM_STATE_STICKY", None);
   }
 
