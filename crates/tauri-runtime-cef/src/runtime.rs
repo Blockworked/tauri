@@ -2586,7 +2586,7 @@ static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
   target_os = "netbsd",
   target_os = "openbsd"
 ))]
-pub(crate) fn is_wayland() -> bool {
+pub fn is_wayland() -> bool {
   *IS_WAYLAND.get().unwrap_or(&false)
 }
 
@@ -2600,7 +2600,7 @@ pub(crate) fn is_wayland() -> bool {
   target_os = "netbsd",
   target_os = "openbsd"
 )))]
-pub(crate) fn is_wayland() -> bool {
+pub fn is_wayland() -> bool {
   false
 }
 
