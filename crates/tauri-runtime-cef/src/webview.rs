@@ -703,20 +703,29 @@ impl<T: UserEvent> WinitCefApp<T> {
     // makes CEF render at a viewport up to `scale`x too large while the
     // visible wl_subsurface stays the correct (smaller) size, so the page's
     // fixed-position/vw/vh content ends up positioned off-screen.
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    // `bounds_dip` (and everything downstream of it) is x86_64-only: it only
+    // feeds `set_as_child_wayland`, which only exists on x86_64 Linux -- see
+    // the comment above that call below.
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     let bounds_dip = bounds.to_logical::<i32, i32>(scale);
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     let bounds_dip = cef::Rect {
       x: bounds_dip.position.x,
@@ -775,33 +784,48 @@ impl<T: UserEvent> WinitCefApp<T> {
     // windowing system, Wayland wants DIP. winit doesn't expose the client's
     // `xdg_surface`, so popups fall back to CEF's degraded (clipped,
     // non-dismissing) form.
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    //
+    // x86_64-only: `set_as_child_wayland` needs the `parent_xdg_surface`
+    // field, which only the x86_64 Linux CEF archive (our Wayland patch on
+    // top of upstream CEF, from `cef-wayland-build`) carries -- other Linux
+    // architectures use the official prebuilt CEF, which doesn't have it, so
+    // they fall back to the plain X11-style `set_as_child` below.
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     let initial_bounds = if crate::runtime::is_wayland() {
       &bounds_dip
     } else {
       &bounds
     };
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     let mut window_info =
       cef::WindowInfo::default().set_as_child_wayland(parent, None, initial_bounds);
-    #[cfg(not(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    #[cfg(not(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     )))]
     let mut window_info = cef::WindowInfo::default().set_as_child(parent, &bounds);
     window_info.runtime_style = cef_runtime_style;
