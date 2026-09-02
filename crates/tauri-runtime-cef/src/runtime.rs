@@ -20,12 +20,17 @@ use std::{
 
 use cef::*;
 use raw_window_handle::{DisplayHandle, HasDisplayHandle};
-#[cfg(any(
-  target_os = "linux",
-  target_os = "dragonfly",
-  target_os = "freebsd",
-  target_os = "netbsd",
-  target_os = "openbsd"
+// Only used to join CEF to winit's Wayland connection below, which is x86_64-only -- see
+// the comment on `set_wayland_display` further down.
+#[cfg(all(
+  target_arch = "x86_64",
+  any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  )
 ))]
 use raw_window_handle::RawDisplayHandle;
 use tauri_runtime::{
@@ -2754,12 +2759,15 @@ impl TerminationSignals {
   }
 }
 
-#[cfg(any(
-  target_os = "linux",
-  target_os = "dragonfly",
-  target_os = "freebsd",
-  target_os = "netbsd",
-  target_os = "openbsd"
+#[cfg(all(
+  target_arch = "x86_64",
+  any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  )
 ))]
 static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
@@ -2767,26 +2775,39 @@ static IS_WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// [`CefRuntime::init`], before any window is created; every browser in the
 /// process shares the same `--ozone-platform` choice, so this is process-wide
 /// rather than per-window.
-#[cfg(any(
-  target_os = "linux",
-  target_os = "dragonfly",
-  target_os = "freebsd",
-  target_os = "netbsd",
-  target_os = "openbsd"
+///
+/// x86_64-only: only the x86_64 Linux CEF archive (our Wayland patch on top
+/// of upstream CEF, from `cef-wayland-build`) can join a client Wayland
+/// connection at all -- see `set_wayland_display` below. Other architectures
+/// use the official prebuilt CEF, which forces `--ozone-platform=x11` (via
+/// XWayland under a Wayland session) unconditionally in `CefRuntime::init`,
+/// so this always reports `false` there too.
+#[cfg(all(
+  target_arch = "x86_64",
+  any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  )
 ))]
 pub fn is_wayland() -> bool {
   *IS_WAYLAND.get().unwrap_or(&false)
 }
 
-/// Non-Linux platforms have no Wayland concept at all; callers in
-/// cross-platform code can use this unconditionally instead of cfg-gating
-/// every call site.
-#[cfg(not(any(
-  target_os = "linux",
-  target_os = "dragonfly",
-  target_os = "freebsd",
-  target_os = "netbsd",
-  target_os = "openbsd"
+/// Non-x86_64 and non-Linux platforms have no Wayland embedding concept at
+/// all; callers in cross-platform code can use this unconditionally instead
+/// of cfg-gating every call site.
+#[cfg(not(all(
+  target_arch = "x86_64",
+  any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  )
 )))]
 pub fn is_wayland() -> bool {
   false
@@ -2945,21 +2966,35 @@ impl<T: UserEvent> CefRuntime<T> {
     // `Window`, an undefined-rather-than-diagnosed failure. The platform must
     // therefore be selected explicitly, matching whatever winit itself will
     // connect to, so the two agree on which native handles are in play.
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    //
+    // x86_64-only: joining a client's Wayland connection (`set_wayland_display`
+    // below) only works with the x86_64 Linux CEF archive (our Wayland patch on
+    // top of upstream CEF, from `cef-wayland-build`). Other architectures use
+    // the official prebuilt CEF, which has no such capability, so they force
+    // `--ozone-platform=x11` unconditionally below instead (matching upstream
+    // CEF's own lack of Wayland support, same as the Flatpak build's
+    // `--socket=x11`).
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     let use_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
 
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     {
       // `basic` skips the D-Bus secret portal, libsecret and KWallet key providers, any
@@ -3160,6 +3195,21 @@ impl<T: UserEvent> CefRuntime<T> {
       tauri_runtime::gtk::declare_version(tauri_runtime::gtk::Version::V4);
     }
 
+    #[cfg(all(
+      not(target_arch = "x86_64"),
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
+    ))]
+    {
+      command_line_args.push(("ozone-platform".to_string(), Some("x11".to_string())));
+      event_loop_builder.with_x11();
+    }
+
     #[cfg(windows)]
     if let Some(hook) = runtime_args.msg_hook {
       use winit::platform::windows::EventLoopBuilderExtWindows;
@@ -3180,12 +3230,19 @@ impl<T: UserEvent> CefRuntime<T> {
     // opened this connection above; CEF adopts it instead of opening its own,
     // which is what makes embedding a browser into a winit-owned `wl_surface`
     // possible at all (a `wl_surface` cannot cross a connection boundary).
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    //
+    // x86_64-only: `cef::set_wayland_display` only exists on the x86_64 Linux
+    // CEF archive (our Wayland patch); other architectures always run
+    // `--ozone-platform=x11` above, so there's no connection to join.
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     if use_wayland
       && let Ok(RawDisplayHandle::Wayland(handle)) =
