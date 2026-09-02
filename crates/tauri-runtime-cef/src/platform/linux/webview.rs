@@ -169,6 +169,13 @@ impl AppWebview {
     let width = width.max(1);
     let height = height.max(1);
 
+    // x86_64-only: `is_wayland()` only ever reports `true` here on x86_64 (the
+    // only arch whose CEF archive can join a Wayland connection at all -- see
+    // `set_wayland_display` in tauri-runtime-cef's runtime.rs), but
+    // `BrowserHost::set_window_bounds` below only *exists* on x86_64's
+    // generated bindings, so this whole branch must be compiled out on other
+    // architectures rather than just made unreachable at runtime.
+    #[cfg(target_arch = "x86_64")]
     if crate::runtime::is_wayland() {
       // A wl_subsurface receives no configure events, so unlike X11 (where
       // the browser observes the parent window and resizes itself) the
