@@ -41,6 +41,13 @@ impl AppWindow {
   }
 
   pub(crate) fn raise_native(&self) {
+    // Wayland offers clients no protocol to raise their own toplevel above
+    // others; activation goes through xdg-activation, which `focus_window`
+    // (called right after this in `activate`) already drives. The X11
+    // `_NET_ACTIVE_WINDOW` dance below has no target there.
+    if crate::runtime::is_wayland() {
+      return;
+    }
     super::utils::activate_window(self.xid());
   }
 
