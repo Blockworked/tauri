@@ -82,7 +82,12 @@ const BROWSER_ONLY_COMMANDS: &[&CStr] = &[
   resources::IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH,
   resources::IDC_CONTENT_CONTEXT_WEB_REGION_SEARCH,
   resources::IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI,
-  resources::IDC_CONTENT_CONTEXT_SHARING_SUBMENU,
+  // TODO Named inline rather than through `resources::`: the custom cef-rs fork
+  // (which takes priority over upstream CEF) does not define this constant
+  // yet. Every entry here is resolved by name at runtime via
+  // `cef_id_for_command_id_name`, and unknown names are filtered out, so a
+  // literal behaves identically on both old and new CEF builds.
+  c"IDC_CONTENT_CONTEXT_SHARING_SUBMENU",
   resources::IDC_CONTENT_CONTEXT_GENERATE_QR_CODE,
   resources::IDC_ROUTE_MEDIA,
 ];
