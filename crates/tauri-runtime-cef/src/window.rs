@@ -418,9 +418,12 @@ pub(crate) struct AppWindow {
     target_os = "openbsd"
   ))]
   pub(crate) background_surface: Option<SoftbufferSurface>,
+  #[cfg(target_os = "linux")]
+  pub(crate) argb_surface: Option<crate::platform::ArgbSurface>,
   pub(crate) window: Box<dyn WinitWindow>,
   pub(crate) attrs: AppWindowAttrs,
   pub(crate) children: Vec<AppWebview>,
+  pub(crate) osr_cursor_position: PhysicalPosition<f64>,
   pub(crate) listeners: WindowEventListeners,
   /// Deadline for the initial raise of a window created focused, see
   /// [`WinitCefApp::apply_pending_activations`]. `None` once it has been
@@ -568,9 +571,12 @@ impl<T: UserEvent> WinitCefApp<T> {
         target_os = "openbsd"
       ))]
       background_surface: None,
+      #[cfg(target_os = "linux")]
+      argb_surface: None,
       window,
       attrs,
       children: Vec::new(),
+      osr_cursor_position: PhysicalPosition::new(0.0, 0.0),
       listeners: Default::default(),
       pending_activation,
     };

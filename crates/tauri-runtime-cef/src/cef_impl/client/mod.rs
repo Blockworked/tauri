@@ -23,6 +23,7 @@ mod frame;
 pub(crate) mod keyboard;
 mod life_span;
 mod load;
+mod osr;
 mod permission;
 mod process;
 
@@ -38,6 +39,8 @@ pub(crate) use drag::{
 use keyboard::TauriCefKeyboardHandler;
 use life_span::{TauriCefChildLifeSpanHandler, TauriCefChildLifeSpanHandlerArgs};
 use load::TauriCefLoadHandler;
+pub(crate) use osr::{OsrFrame, SharedOsrFrame};
+use osr::{TauriCefOsrRenderHandler, TauriCefOsrRenderHandlerArgs};
 pub(crate) use permission::PermissionRequestHandler;
 use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
@@ -90,6 +93,7 @@ wrap_with_args! {
     drag_drop_event_target: DragDropEventTarget,
     drag_drop_handler_enabled: bool,
     drag_drop_state: Arc<Mutex<DragDropState>>,
+    osr_frame: Option<SharedOsrFrame>,
     frame_navigation_state: crate::FrameNavigationState,
     popup_family: Weak<crate::popup::PopupFamily>,
     opener: Option<crate::popup::PopupRequest>,
@@ -109,6 +113,16 @@ wrap_with_args! {
       self
         .drag_drop_handler_enabled
         .then(|| TauriCefDragHandler::new(self.drag_drop_state.clone()))
+    }
+
+    fn render_handler(&self) -> Option<RenderHandler> {
+      self.osr_frame.as_ref().map(|frame| {
+        TauriCefOsrRenderHandler::build(TauriCefOsrRenderHandlerArgs {
+          frame: frame.clone(),
+          context: self.context.clone(),
+          window_id: self.window_id,
+        })
+      })
     }
 
     fn request_handler(&self) -> Option<RequestHandler> {
@@ -159,6 +173,7 @@ wrap_with_args! {
           drag_drop_event_target: target,
           drag_drop_handler_enabled: false,
           drag_drop_state: Arc::default(),
+          osr_frame: None,
           frame_navigation_state: state,
           popup_family: family.clone(),
           opener: Some(opener),

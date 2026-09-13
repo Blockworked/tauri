@@ -434,6 +434,7 @@ pub(crate) struct AppWebview {
   pub(crate) popup_family: Arc<crate::popup::PopupFamily>,
   pub(crate) dialogs: crate::dialog::DialogState,
   pub(crate) host: cef::BrowserHost,
+  pub(crate) osr_frame: Option<browser_client::SharedOsrFrame>,
   pub(crate) uri_scheme_protocols: Arc<HashMap<String, Arc<Box<UriSchemeProtocolHandler>>>>,
   pub(crate) devtools_protocol_handlers: Arc<Mutex<Vec<Arc<DevToolsProtocolHandler>>>>,
   /// Keeps the DevTools message observer registered. Dropping this unregisters the observer.
@@ -458,6 +459,32 @@ pub(crate) struct AppWebview {
 }
 
 impl AppWebview {
+  pub(crate) fn is_osr(&self) -> bool {
+    self.osr_frame.is_some()
+  }
+
+  fn update_osr_bounds(&self, scale: f64, x: i32, y: i32, width: i32, height: i32) -> bool {
+    let Some(frame) = &self.osr_frame else {
+      return false;
+    };
+    let mut frame = frame.lock().unwrap();
+    frame.view_width = (f64::from(width.max(1)) / scale).round().max(1.0) as i32;
+    frame.view_height = (f64::from(height.max(1)) / scale).round().max(1.0) as i32;
+    frame.device_scale_factor = scale as f32;
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    self.wayland_bounds.set(Some(Rect {
+      position: PhysicalPosition::new(x, y).into(),
+      size: PhysicalSize::new(width.max(1) as u32, height.max(1) as u32).into(),
+    }));
+    true
+  }
+
   pub(crate) fn set_bounds(&mut self, parent_size: PhysicalSize<u32>, scale: f64, bounds: Rect) {
     let position = bounds.position.to_physical::<i32>(scale);
     let size = bounds.size.to_physical::<u32>(scale);
@@ -479,7 +506,9 @@ impl AppWebview {
     }
 
     self.host.notify_move_or_resize_started();
-    self.apply_physical_bounds(scale, x, y, w, h);
+    if !self.update_osr_bounds(scale, x, y, w, h) {
+      self.apply_physical_bounds(scale, x, y, w, h);
+    }
     self.host.was_resized();
   }
 
@@ -626,6 +655,18 @@ impl<T: UserEvent> WinitCefApp<T> {
       .allowed_chrome_commands
       .clone();
     let drag_drop_handler_enabled = pending.webview_attributes.drag_drop_handler_enabled;
+    #[cfg(target_os = "linux")]
+    let is_osr = pending.webview_attributes.transparent;
+    #[cfg(not(target_os = "linux"))]
+    let is_osr = false;
+    let osr_frame = is_osr.then(|| {
+      Arc::new(Mutex::new(browser_client::OsrFrame {
+        view_width: (f64::from(parent_size.width) / scale).round().max(1.0) as i32,
+        view_height: (f64::from(parent_size.height) / scale).round().max(1.0) as i32,
+        device_scale_factor: scale as f32,
+        ..Default::default()
+      }))
+    });
     let drag_drop_state = Arc::new(Mutex::new(browser_client::DragDropState::default()));
     let web_content_process_terminate_handler = pending
       .on_web_content_process_terminate_handler
@@ -682,6 +723,7 @@ impl<T: UserEvent> WinitCefApp<T> {
         drag_drop_event_target,
         drag_drop_handler_enabled,
         drag_drop_state,
+        osr_frame: osr_frame.clone(),
         frame_navigation_state: frame_navigation_state.clone(),
         popup_family: Arc::downgrade(&popup_family),
         opener: None,
@@ -815,8 +857,11 @@ impl<T: UserEvent> WinitCefApp<T> {
         target_os = "openbsd"
       )
     ))]
-    let mut window_info =
-      cef::WindowInfo::default().set_as_child_wayland(parent, None, initial_bounds);
+    let mut window_info = if is_osr {
+      cef::WindowInfo::default().set_as_windowless(parent)
+    } else {
+      cef::WindowInfo::default().set_as_child_wayland(parent, None, initial_bounds)
+    };
     #[cfg(not(all(
       target_arch = "x86_64",
       any(
@@ -827,7 +872,11 @@ impl<T: UserEvent> WinitCefApp<T> {
         target_os = "openbsd"
       )
     )))]
-    let mut window_info = cef::WindowInfo::default().set_as_child(parent, &bounds);
+    let mut window_info = if is_osr {
+      cef::WindowInfo::default().set_as_windowless(parent)
+    } else {
+      cef::WindowInfo::default().set_as_child(parent, &bounds)
+    };
     window_info.runtime_style = cef_runtime_style;
     let mut settings = browser_settings_from_webview_attributes(&pending.webview_attributes);
     // Applied last so an application can override what the runtime mapped.
@@ -940,6 +989,7 @@ impl<T: UserEvent> WinitCefApp<T> {
             popup_family,
             dialogs,
             host,
+            osr_frame,
             uri_scheme_protocols,
             devtools_protocol_handlers,
             devtools_observer_registration,
@@ -1976,7 +2026,9 @@ pub(crate) fn layout_app_window(appwindow: &AppWindow) {
     let w = (rate.width * win_w).round() as i32;
     let h = (rate.height * win_h).round() as i32;
     child.host.notify_move_or_resize_started();
-    child.apply_physical_bounds(scale, x, y, w, h);
+    if !child.update_osr_bounds(scale, x, y, w, h) {
+      child.apply_physical_bounds(scale, x, y, w, h);
+    }
     child.host.was_resized();
   }
 }
