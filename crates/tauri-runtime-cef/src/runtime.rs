@@ -44,10 +44,13 @@ use tauri_runtime::{
   },
 };
 use tauri_utils::Theme;
+use winit::keyboard::{Key, NamedKey};
 use winit::{
   application::ApplicationHandler,
   data_transfer::{DataTransferId, TypeHint},
-  event::{StartCause, WindowEvent as WinitWindowEvent},
+  event::{
+    ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent as WinitWindowEvent,
+  },
   event_loop::{
     ActiveEventLoop, DndAction, EventLoop, EventLoopBuilder, EventLoopProxy as WinitEventLoopProxy,
   },
@@ -1351,6 +1354,7 @@ pub(crate) type AfterWindowCreationCallback = Box<dyn for<'a> Fn(RawWindow<'a>) 
 pub(crate) enum Message<T: UserEvent> {
   EventLoop(EventLoopMessage),
   BrowserClosed(WindowId, u32),
+  RequestRedraw(WindowId),
   PopupPending(crate::popup::PopupRequest, Arc<crate::popup::PopupFamily>),
   PopupCreated(
     crate::popup::PopupRequest,
@@ -1713,6 +1717,11 @@ impl<T: UserEvent> WinitCefApp<T> {
           self.request_window_close(window_id, event_loop);
         } else {
           self.exit_if_done(event_loop);
+        }
+      }
+      Message::RequestRedraw(window_id) => {
+        if let Some(window) = self.state.windows.get(&window_id) {
+          window.window.request_redraw();
         }
       }
       #[cfg(any(target_os = "macos", windows))]
@@ -2210,6 +2219,114 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
           child.host.set_focus(focused as i32);
         }
         self.emit_window_event(window_id, WindowEvent::Focused(focused));
+      }
+      WinitWindowEvent::PointerMoved { position, .. } => {
+        appwindow.osr_cursor_position = position;
+        if let Some(child) = appwindow.children.iter().find(|child| child.is_osr()) {
+          let scale = appwindow.window.scale_factor();
+          let event = cef::MouseEvent {
+            x: (position.x / scale).round() as i32,
+            y: (position.y / scale).round() as i32,
+            modifiers: 0,
+          };
+          child.host.send_mouse_move_event(Some(&event), 0);
+        }
+      }
+      WinitWindowEvent::PointerButton {
+        state,
+        button,
+        position,
+        ..
+      } => {
+        if let Some(child) = appwindow.children.iter().find(|child| child.is_osr()) {
+          let Some(button) = button.mouse_button() else {
+            return;
+          };
+          let button = match button {
+            MouseButton::Left => cef::MouseButtonType::LEFT,
+            MouseButton::Middle => cef::MouseButtonType::MIDDLE,
+            MouseButton::Right => cef::MouseButtonType::RIGHT,
+            _ => return,
+          };
+          let scale = appwindow.window.scale_factor();
+          appwindow.osr_cursor_position = position;
+          let event = cef::MouseEvent {
+            x: (position.x / scale).round() as i32,
+            y: (position.y / scale).round() as i32,
+            modifiers: 0,
+          };
+          child.host.send_mouse_click_event(
+            Some(&event),
+            button,
+            (state == ElementState::Released) as i32,
+            1,
+          );
+        }
+      }
+      WinitWindowEvent::MouseWheel { delta, .. } => {
+        if let Some(child) = appwindow.children.iter().find(|child| child.is_osr()) {
+          let scale = appwindow.window.scale_factor();
+          let position = appwindow.osr_cursor_position;
+          let event = cef::MouseEvent {
+            x: (position.x / scale).round() as i32,
+            y: (position.y / scale).round() as i32,
+            modifiers: 0,
+          };
+          let (delta_x, delta_y) = match delta {
+            MouseScrollDelta::LineDelta(x, y) => {
+              ((x * 120.0).round() as i32, (y * 120.0).round() as i32)
+            }
+            MouseScrollDelta::PixelDelta(pos) => (pos.x.round() as i32, pos.y.round() as i32),
+          };
+          child
+            .host
+            .send_mouse_wheel_event(Some(&event), delta_x, delta_y);
+        }
+      }
+      WinitWindowEvent::KeyboardInput { event, .. } => {
+        if let Some(child) = appwindow.children.iter().find(|child| child.is_osr()) {
+          let character = match &event.logical_key {
+            Key::Character(value) => value.encode_utf16().next().unwrap_or(0),
+            Key::Named(NamedKey::Enter) => 13,
+            Key::Named(NamedKey::Tab) => 9,
+            Key::Named(NamedKey::Backspace) => 8,
+            Key::Named(NamedKey::Escape) => 27,
+            _ => 0,
+          };
+          let windows_key_code = match &event.logical_key {
+            Key::Named(NamedKey::Escape) => 27,
+            Key::Named(NamedKey::Enter) => 13,
+            Key::Named(NamedKey::Tab) => 9,
+            Key::Named(NamedKey::Backspace) => 8,
+            Key::Named(NamedKey::Delete) => 46,
+            Key::Named(NamedKey::ArrowLeft) => 37,
+            Key::Named(NamedKey::ArrowUp) => 38,
+            Key::Named(NamedKey::ArrowRight) => 39,
+            Key::Named(NamedKey::ArrowDown) => 40,
+            _ => character as i32,
+          };
+          let key = cef::KeyEvent {
+            size: std::mem::size_of::<cef::KeyEvent>(),
+            type_: if event.state == ElementState::Pressed {
+              cef::KeyEventType::RAWKEYDOWN
+            } else {
+              cef::KeyEventType::KEYUP
+            },
+            modifiers: 0,
+            windows_key_code,
+            native_key_code: 0,
+            is_system_key: 0,
+            character,
+            unmodified_character: character,
+            focus_on_editable_field: 0,
+          };
+          child.host.send_key_event(Some(&key));
+          if event.state == ElementState::Pressed && character != 0 {
+            let mut char_event = key;
+            char_event.type_ = cef::KeyEventType::CHAR;
+            child.host.send_key_event(Some(&char_event));
+          }
+        }
       }
       WinitWindowEvent::ThemeChanged(theme) => {
         let system_theme = winit_theme_to_tauri_theme(theme);
@@ -3336,6 +3453,7 @@ impl<T: UserEvent> CefRuntime<T> {
       log_severity,
       persist_session_cookies: persist_session_cookies as std::os::raw::c_int,
       external_message_pump: 1,
+      windowless_rendering_enabled: 1,
       ..Default::default()
     };
 

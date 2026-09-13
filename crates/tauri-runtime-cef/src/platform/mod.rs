@@ -16,6 +16,8 @@ pub mod macos;
   target_os = "openbsd"
 ))]
 pub mod linux;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::argb_surface::ArgbSurface;
 
 use tauri_runtime::dpi::PhysicalRect;
 use winit::monitor::MonitorHandle;

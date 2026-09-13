@@ -10534,6 +10534,8 @@ dependencies = [
  "tauri-runtime",
  "tauri-utils",
  "url",
+ "wayland-backend",
+ "wayland-client",
  "windows 0.61.3",
  "winit",
  "x11-dl",

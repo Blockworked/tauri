@@ -14,6 +14,9 @@ use super::utils::{atom, with_cef_display};
 
 impl AppWebview {
   pub(crate) fn native_parent_matches(&self, parent: &AppWindow) -> Option<bool> {
+    if self.is_osr() {
+      return None;
+    }
     let xid = self.host.window_handle();
     if xid == 0 {
       return None;
@@ -40,6 +43,9 @@ impl AppWebview {
   }
 
   pub(crate) fn native_visible(&self) -> Option<bool> {
+    if self.is_osr() {
+      return None;
+    }
     let xid = self.host.window_handle();
     if xid == 0 {
       return None;
@@ -70,7 +76,7 @@ impl AppWebview {
     // A wl_subsurface's position lives in the compositor; there's no
     // Wayland equivalent of XGetGeometry to read it back, so this reports
     // whatever was last pushed through `apply_physical_bounds`.
-    if crate::runtime::is_wayland() {
+    if self.is_osr() || crate::runtime::is_wayland() {
       return self.wayland_bounds.get();
     }
 
@@ -108,6 +114,9 @@ impl AppWebview {
   }
 
   pub(crate) fn reparent(&self, parent: &AppWindow) {
+    if self.is_osr() {
+      return;
+    }
     // A wl_subsurface is bound to its parent surface at creation and can't be
     // reattached to a different one; moving a webview to another window has
     // no Wayland equivalent.
@@ -127,6 +136,9 @@ impl AppWebview {
   }
 
   pub(crate) fn apply_visible(&self, visible: bool) {
+    if self.is_osr() {
+      return;
+    }
     // No `_NET_WM_STATE`-equivalent for a wl_subsurface; hide/show isn't part
     // of the upstream Wayland embedding API.
     if crate::runtime::is_wayland() {

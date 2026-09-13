@@ -294,7 +294,23 @@ impl AppWindow {
   /// becoming visible. X11 has no such requirement, so this is skipped there;
   /// its background painting still goes through `set_background_color`.
   pub(crate) fn draw_background_surface(&mut self) {
-    if !crate::runtime::is_wayland() {
+    let osr_frame = self
+      .children
+      .iter()
+      .find_map(|child| child.osr_frame.clone());
+    if crate::runtime::is_wayland()
+      && let Some(frame) = osr_frame
+    {
+      let size = self.window.surface_size();
+      if self.argb_surface.is_none() {
+        self.argb_surface = super::argb_surface::ArgbSurface::new(self.window.as_ref());
+      }
+      if let Some(surface) = &mut self.argb_surface {
+        surface.present(size.width, size.height, &frame);
+      }
+      return;
+    }
+    if !crate::runtime::is_wayland() && osr_frame.is_none() {
       return;
     }
 
@@ -332,7 +348,34 @@ impl AppWindow {
     if surface.resize(width, height).is_ok()
       && let Ok(mut buffer) = surface.buffer_mut()
     {
-      buffer.fill(color);
+      if let Some(frame) = osr_frame {
+        let frame = frame.lock().unwrap();
+        let src_width = frame.paint_width.max(0) as usize;
+        let src_height = frame.paint_height.max(0) as usize;
+        let dst_width = width.get() as usize;
+        let dst_height = height.get() as usize;
+        if src_width > 0
+          && src_height > 0
+          && frame.bgra.len() >= src_width.saturating_mul(src_height).saturating_mul(4)
+        {
+          for dst_y in 0..dst_height {
+            let src_y = dst_y.saturating_mul(src_height) / dst_height;
+            for dst_x in 0..dst_width {
+              let src_x = dst_x.saturating_mul(src_width) / dst_width;
+              let src = (src_y * src_width + src_x) * 4;
+              let b = frame.bgra[src] as u32;
+              let g = frame.bgra[src + 1] as u32;
+              let r = frame.bgra[src + 2] as u32;
+              let a = frame.bgra[src + 3] as u32;
+              buffer[dst_y * dst_width + dst_x] = b | (g << 8) | (r << 16) | (a << 24);
+            }
+          }
+        } else {
+          buffer.fill(color);
+        }
+      } else {
+        buffer.fill(color);
+      }
       let _ = buffer.present();
     }
   }
