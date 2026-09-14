@@ -603,9 +603,9 @@ impl AppWindow {
     self.preferred_theme().or(app_wide_theme)
   }
 
-  /// Size available for CEF child layout. On Linux this is the GTK content-area
-  /// X11 host size, excluding GTK UI such as menus; elsewhere it is the window
-  /// surface size.
+  /// Size available for CEF child layout. On Linux/X11 this is the GTK content-area
+  /// X11 host size, excluding GTK UI such as menus; under Wayland (where there
+  /// is no X11 host) and elsewhere it is the window surface size.
   pub(crate) fn safe_surface_size(&self) -> PhysicalSize<u32> {
     #[cfg(any(
       target_os = "linux",
@@ -615,7 +615,12 @@ impl AppWindow {
       target_os = "openbsd"
     ))]
     {
-      self.cef_host.size()
+      // Must be a runtime check, not `cfg!`: one binary serves both backends.
+      if crate::runtime::is_wayland() {
+        self.window.surface_size()
+      } else {
+        self.cef_host.size()
+      }
     }
 
     #[cfg(not(any(

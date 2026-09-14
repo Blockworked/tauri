@@ -2272,6 +2272,9 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
             y: (position.y / scale).round() as i32,
             modifiers: 0,
           };
+          // The wildcard is unreachable on winit versions where the enum is still
+          // exhaustive, but required where it is `#[non_exhaustive]`.
+          #[allow(unreachable_patterns)]
           let (delta_x, delta_y) = match delta {
             MouseScrollDelta::LineDelta(x, y) => {
               ((x * 120.0).round() as i32, (y * 120.0).round() as i32)

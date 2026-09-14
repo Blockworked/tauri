@@ -37,12 +37,21 @@ use super::{taskbar, utils::set_wm_state};
 ///     - CEF webview
 pub(crate) struct CefX11Host {
   default_vbox: gtk::Box,
-  xid: c_ulong,
-  colormap: c_ulong,
+  /// Native X11 container for CEF browser children. `None` when the GDK
+  /// backend is Wayland: there browsers parent to the `wl_surface` (or render
+  /// off-screen) and no X11 window exists, so anything touching it must have
+  /// returned early on `is_wayland()` already.
+  x11: Option<X11Host>,
   geometry: Rc<HostGeometry>,
   /// CSS provider currently backing this window's background color, kept so it can be removed
   /// from the display instead of accumulating one provider per `set_background_color` call.
   background_color_provider: RefCell<Option<gtk::CssProvider>>,
+}
+
+/// Native X11 container a [`CefX11Host`] reparents CEF browsers into.
+struct X11Host {
+  xid: c_ulong,
+  colormap: c_ulong,
 }
 
 /// Geometry of the X11 host, shared with the GTK `layout` handler that keeps it up to date.
@@ -69,39 +78,47 @@ impl CefX11Host {
     default_vbox.append(&webview_area);
     gtk_window.set_child(Some(&default_vbox));
 
-    let parent_xid = window_xid(window);
     let initial_size = window.surface_size();
-    let (xid, colormap) = create_cef_container(parent_xid, initial_size)?;
-
     let geometry = Rc::new(HostGeometry {
       size: Cell::new(initial_size),
       needs_relayout: Cell::new(false),
     });
 
-    if let Some(surface) = gtk_window.surface() {
-      let gtk_window = gtk_window.clone();
-      let layout_webview_area = webview_area.clone();
-      let layout_geometry = geometry.clone();
-      surface.connect_layout(move |surface, _, _| {
-        let size = set_cef_container_bounds(
-          xid,
-          &gtk_window,
-          &layout_webview_area,
-          surface.scale_factor().max(1) as f64,
-        );
-        if layout_geometry.size.replace(size) != size {
-          // The content area changed without the toplevel being resized - a menu bar was
-          // attached, hidden or shown - so winit emits no `SurfaceResized` and the CEF children
-          // would keep the bounds computed against the previous host size.
-          layout_geometry.needs_relayout.set(true);
-        }
-      });
-    }
+    // No X11 container under Wayland: the window handle is a `wl_surface*`,
+    // not an X11 `Window`, so `window_xid` below would panic. Browsers parent
+    // to the surface (or render off-screen) instead.
+    let x11 = if crate::runtime::is_wayland() {
+      None
+    } else {
+      let parent_xid = window_xid(window);
+      let (xid, colormap) = create_cef_container(parent_xid, initial_size)?;
+
+      if let Some(surface) = gtk_window.surface() {
+        let gtk_window = gtk_window.clone();
+        let layout_webview_area = webview_area.clone();
+        let layout_geometry = geometry.clone();
+        surface.connect_layout(move |surface, _, _| {
+          let size = set_cef_container_bounds(
+            xid,
+            &gtk_window,
+            &layout_webview_area,
+            surface.scale_factor().max(1) as f64,
+          );
+          if layout_geometry.size.replace(size) != size {
+            // The content area changed without the toplevel being resized - a menu bar was
+            // attached, hidden or shown - so winit emits no `SurfaceResized` and the CEF children
+            // would keep the bounds computed against the previous host size.
+            layout_geometry.needs_relayout.set(true);
+          }
+        });
+      }
+
+      Some(X11Host { xid, colormap })
+    };
 
     Some(Self {
       default_vbox,
-      xid,
-      colormap,
+      x11,
       geometry,
       background_color_provider: RefCell::new(None),
     })
@@ -111,10 +128,16 @@ impl CefX11Host {
     self.default_vbox.clone()
   }
 
+  /// Native X11 container, if this window has one. `None` under Wayland;
+  /// callers there must have returned early on `is_wayland()` already.
+  fn x11(&self) -> &X11Host {
+    self.x11.as_ref().expect("no X11 host on a Wayland window")
+  }
+
   /// CSS class carrying this window's background color. The X11 host id makes it unique per
   /// window, since the providers below are registered display-wide.
-  fn background_color_class(&self) -> String {
-    format!("tauri-cef-window-background-{}", self.xid)
+  fn background_color_class(xid: c_ulong) -> String {
+    format!("tauri-cef-window-background-{xid}")
   }
 
   pub(crate) fn size(&self) -> PhysicalSize<u32> {
@@ -144,10 +167,13 @@ impl Drop for CefX11Host {
       );
     }
 
-    super::utils::with_x11((), |xlib, display| unsafe {
-      (xlib.XDestroyWindow)(display, self.xid);
-      (xlib.XFreeColormap)(display, self.colormap);
-    });
+    if let Some(x11) = &self.x11 {
+      let (xid, colormap) = (x11.xid, x11.colormap);
+      super::utils::with_x11((), |xlib, display| unsafe {
+        (xlib.XDestroyWindow)(display, xid);
+        (xlib.XFreeColormap)(display, colormap);
+      });
+    }
   }
 }
 
@@ -166,7 +192,7 @@ impl AppWindow {
       };
       return handle.surface.as_ptr() as cef::sys::cef_window_handle_t;
     }
-    self.cef_host.xid as cef::sys::cef_window_handle_t
+    self.cef_host.x11().xid as cef::sys::cef_window_handle_t
   }
 
   pub(crate) fn xid(&self) -> c_ulong {
@@ -229,7 +255,8 @@ impl AppWindow {
     };
 
     let display = gtk::prelude::WidgetExt::display(&window);
-    let class = self.cef_host.background_color_class();
+    let xid = self.cef_host.x11().xid;
+    let class = CefX11Host::background_color_class(xid);
 
     // GTK has no way to replace a provider, so drop the one installed by the previous call -
     // otherwise every call leaves another provider registered on the display for good.
