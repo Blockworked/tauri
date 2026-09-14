@@ -3080,12 +3080,15 @@ impl<T: UserEvent> CefRuntime<T> {
     // Applied to every process type rather than only the browser one: it is not certain
     // that Chromium propagates `ozone-platform` to the GPU process, and getting it wrong
     // there breaks rendering outright.
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd"
+    #[cfg(all(
+      target_arch = "x86_64",
+      any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      )
     ))]
     {
       let _ = IS_WAYLAND.set(use_wayland);
@@ -3111,7 +3114,7 @@ impl<T: UserEvent> CefRuntime<T> {
       )
     ))]
     {
-      command_line_args.push(("ozone-platform".to_string(), Some("x11".to_string())));
+      internal_command_line_args.push(("--ozone-platform".to_string(), Some("x11".to_string())));
       event_loop_builder.with_x11();
     }
 
