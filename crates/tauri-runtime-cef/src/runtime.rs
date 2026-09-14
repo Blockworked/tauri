@@ -2277,6 +2277,8 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
               ((x * 120.0).round() as i32, (y * 120.0).round() as i32)
             }
             MouseScrollDelta::PixelDelta(pos) => (pos.x.round() as i32, pos.y.round() as i32),
+            // `MouseScrollDelta` is non-exhaustive; ignore any future delta kind.
+            _ => (0, 0),
           };
           child
             .host
