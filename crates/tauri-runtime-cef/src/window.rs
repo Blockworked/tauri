@@ -743,6 +743,17 @@ impl<T: UserEvent> WinitCefApp<T> {
     // so without this call the window exists (e.g. it can still show up in a
     // taskbar) but never becomes visible. X11 has no such requirement, but
     // painting here is harmless there too.
+    //
+    // Skipped on Wayland specifically: xdg-shell forbids attaching a buffer to
+    // a surface before its first `xdg_surface.configure` has been
+    // acknowledged, and that configure can't have arrived yet at this point in
+    // construction — it's inherently asynchronous, a compositor round trip
+    // after the surface is created. Committing here anyway is a protocol
+    // violation; KWin responds by silently dropping the connection, which
+    // surfaces moments later as `Gdk-Message: Error flushing display: Broken
+    // pipe` when GDK's own (compliant, configure-gated) commit hits the
+    // now-dead socket. The `RedrawRequested` handler below does this same
+    // paint safely, once per configure, so Wayland only needs that one.
     #[cfg(any(
       windows,
       target_os = "linux",
@@ -751,7 +762,9 @@ impl<T: UserEvent> WinitCefApp<T> {
       target_os = "netbsd",
       target_os = "openbsd"
     ))]
-    appwindow.draw_background_surface();
+    if !crate::runtime::is_wayland() {
+      appwindow.draw_background_surface();
+    }
 
     #[cfg(target_os = "macos")]
     if appwindow.attrs.background_color.is_some() {
