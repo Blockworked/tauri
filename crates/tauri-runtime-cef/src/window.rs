@@ -218,6 +218,32 @@ fn prepare_window_attributes(event_loop: &dyn ActiveEventLoop, attrs: &mut AppWi
   }
 }
 
+/// Names the window after the application, as the Wayland `app_id` or the X11
+/// `WM_CLASS` depending on which backend the event loop picked. Without one, the
+/// compositor can only guess the app from the executable path (which fails inside
+/// a Flatpak sandbox), so the window loses its icon, taskbar grouping and any
+/// window rules keyed on it.
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+fn apply_app_id(attrs: &mut WindowAttributes, app_id: &str) {
+  if crate::runtime::is_wayland() {
+    use winit::platform::wayland::WindowAttributesWayland;
+    attrs.platform = Some(Box::new(
+      WindowAttributesWayland::default().with_name(app_id, app_id),
+    ));
+  } else {
+    use winit::platform::x11::WindowAttributesX11;
+    attrs.platform = Some(Box::new(
+      WindowAttributesX11::default().with_name(app_id, app_id),
+    ));
+  }
+}
+
 fn paired_size_constraint(
   width: Option<tauri_runtime::dpi::PixelUnit>,
   height: Option<tauri_runtime::dpi::PixelUnit>,
@@ -550,6 +576,16 @@ impl<T: UserEvent> WinitCefApp<T> {
         tauri_theme_to_winit_theme(*self.context.app_wide_theme.lock().unwrap());
     }
     prepare_window_attributes(event_loop, &mut attrs);
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    if let Some(app_id) = &self.context.app_id {
+      apply_app_id(&mut attrs.inner, app_id);
+    }
 
     let window = event_loop
       .create_window(attrs.inner.clone())

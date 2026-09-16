@@ -1168,6 +1168,16 @@ pub(crate) struct RuntimeContext<T: UserEvent> {
   /// Whether [`Cef::devtools`] lets this application open DevTools at all. Combined with
   /// the per-webview `WebviewAttributes::devtools`, which can only narrow it further.
   pub(crate) devtools_allowed: bool,
+  /// The application's ID when `app.enableGTKAppId` is set, given to every window as its
+  /// Wayland `app_id` / X11 `WM_CLASS` so the desktop can match it to its `.desktop` file.
+  #[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+  ))]
+  pub(crate) app_id: Option<Arc<String>>,
 }
 
 /// Scoped access to the current winit callback state.
@@ -2859,6 +2869,15 @@ impl<T: UserEvent> CefRuntime<T> {
       api_version: _,
     } = runtime_args.runtime_init_attrs;
 
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    let app_id = runtime_args.app_id;
+
     // CEF reads its crash-reporter overrides from `BasicStartupComplete`, which
     // `cef::initialize` below reaches, and every child process inherits this environment.
     // `SSLKEYLOGFILE` is answered further down, on the command line.
@@ -3179,6 +3198,14 @@ impl<T: UserEvent> CefRuntime<T> {
       content_settings: Arc::new(content_settings),
       certificate_errors,
       devtools_allowed,
+      #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+      ))]
+      app_id: app_id.map(Arc::new),
     };
 
     internal_command_line_args.push(("--no-first-run".to_string(), None));
@@ -3509,8 +3536,37 @@ impl<T: UserEvent> Runtime<T> for CefRuntime<T> {
       Box::new(callback),
       self.scheme_registry,
     );
-    let _ = self.event_loop.run_app(app);
-    cef::shutdown();
+    // On Linux CEF adopts winit's Wayland connection (see
+    // `set_wayland_display` in `init`), and Chromium's Ozone teardown inside
+    // `cef::shutdown` still sends requests on it (e.g. releasing the seat).
+    // `run_app` consumes the event loop and disconnects that display on
+    // return, so shutdown would marshal onto a freed connection and segfault.
+    // Keep the event loop alive until CEF is done with it.
+    #[cfg(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    ))]
+    {
+      use winit::event_loop::run_on_demand::EventLoopExtRunOnDemand;
+      let mut event_loop = self.event_loop;
+      let _ = event_loop.run_app_on_demand(app);
+      cef::shutdown();
+      drop(event_loop);
+    }
+    #[cfg(not(any(
+      target_os = "linux",
+      target_os = "dragonfly",
+      target_os = "freebsd",
+      target_os = "netbsd",
+      target_os = "openbsd"
+    )))]
+    {
+      let _ = self.event_loop.run_app(app);
+      cef::shutdown();
+    }
   }
 }
 

@@ -1248,7 +1248,7 @@ dependencies = [
 [[package]]
 name = "cef"
 version = "151.8.0+151.3.24"
-source = "git+https://github.com/EthanRStokes/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
+source = "git+https://github.com/Blockworked/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
@@ -1267,11 +1267,11 @@ dependencies = [
 [[package]]
 name = "cef-dll-sys"
 version = "151.8.0+151.3.24"
-source = "git+https://github.com/EthanRStokes/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
+source = "git+https://github.com/Blockworked/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
 dependencies = [
  "anyhow",
  "cmake",
- "download-cef 2.3.2 (git+https://github.com/EthanRStokes/cef-rs?rev=b8fad92)",
+ "download-cef 2.3.2 (git+https://github.com/Blockworked/cef-rs?rev=b8fad92)",
  "serde_json",
 ]
 
@@ -2427,7 +2427,7 @@ dependencies = [
 [[package]]
 name = "download-cef"
 version = "2.3.2"
-source = "git+https://github.com/EthanRStokes/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
+source = "git+https://github.com/Blockworked/cef-rs?rev=b8fad92#b8fad9223f140f075a178a824de8a5e56e63d491"
 dependencies = [
  "bzip2 0.6.1",
  "clap",

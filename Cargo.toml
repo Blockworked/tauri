@@ -87,5 +87,5 @@ tauri-plugin = { path = "./crates/tauri-plugin" }
 tauri-utils = { path = "./crates/tauri-utils" }
 tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "feat/cef" }
 # cef-rs fork with Wayland embedding support (chromiumembedded/cef#4233).
-cef = { git = "https://github.com/EthanRStokes/cef-rs", rev = "b8fad92" }
-cef-dll-sys = { git = "https://github.com/EthanRStokes/cef-rs", rev = "b8fad92" }
+cef = { git = "https://github.com/Blockworked/cef-rs", rev = "b8fad92" }
+cef-dll-sys = { git = "https://github.com/Blockworked/cef-rs", rev = "b8fad92" }
